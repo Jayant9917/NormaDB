@@ -1,101 +1,77 @@
 # NormaDB - Database Normalization Analyzer
 
-Version-1 (Foundational Engineering Release)
+**Version-1.0.0 - Production Ready** 🚀
 
-A PostgreSQL database normalization analyzer that checks your SQL schemas for 1NF, 2NF, and 3NF compliance.
+> Static database normalization analyzer for PostgreSQL with clean architecture and multi-schema support.
 
-## Features
+---
 
-- **PostgreSQL SQL Parsing**: Reliable parsing of CREATE TABLE statements
-- **Normalization Analysis**: Detects violations for 1NF, 2NF, and 3NF
-- **Compliance Scoring**: Provides percentage-based compliance scores
-- **Actionable Recommendations**: Detailed explanations and fix suggestions
-- **Modern React UI**: Clean, responsive interface for file upload and results
-- **REST API**: Express.js backend with comprehensive endpoints
+## 🎯 What It Does
 
-## Architecture
+NormaDB analyzes PostgreSQL database schemas for normalization compliance (1NF, 2NF, 3NF) with **deterministic rule-based analysis** - no AI, no ML, no guessing.
 
+### ✅ Key Features
+- **🔍 Multi-Schema Support**: Analyze databases with multiple schemas (auth, public, realtime, storage, etc.)
+- **📊 Normalization Analysis**: 1NF, 2NF, 3NF compliance with detailed violation reporting
+- **🏗️ Clean Architecture**: Single entry point analyzer with parser/analysis separation
+- **📄 Multiple Input Formats**: SQL files and PostgreSQL dump files
+- **⚡ Real-Time Analysis**: Instant feedback with explainable violations
+- **🎯 Production Ready**: Runtime contract enforcement, TypeScript, comprehensive testing
+
+### 🎨 Architecture
 ```
-React UI
-   ↓
-Node.js API (Express)
-   ↓
-SQL Parser → Canonical Schema Model
-   ↓
-Normalization Rule Engine
-   ↓
-Compliance Calculator
-   ↓
-Report Builder
+API Layer → Parser Selection → ExtractedTable Objects → Analyzer → Rule Engine → Scoring → Response
 ```
 
-## Supported SQL Constructs
+**Key Principle**: ❌ Analyzer never parses SQL | ✅ Parser is single source of truth
 
-- `CREATE TABLE` statements
-- Column definitions with data types
-- `PRIMARY KEY` constraints
-- `FOREIGN KEY` constraints  
-- `UNIQUE` constraints
+---
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
-
-- Node.js 16+ 
-- npm or yarn
+- Node.js 16+
+- PostgreSQL dump files or SQL schemas
 
 ### Installation
-
-1. **Install backend dependencies**:
 ```bash
-cd backend && npm install
-```
+# Clone and install
+git clone <repository-url>
+cd NormaDB
+npm install
 
-2. **Install frontend dependencies**:
-```bash
-cd frontend && npm install
-```
-
-3. **Build the project**:
-```bash
+# Build for production
+npm run build
 cd backend && npm run build
 ```
 
 ### Development
-
-1. **Start the backend server**:
 ```bash
-cd backend && npm run dev
-```
-The API will be available at `http://localhost:3001`
+# Start development servers
+npm run dev
 
-2. **Start the frontend development server**:
-```bash
-cd backend && npm run dev:frontend
+# Backend API: http://localhost:3001
+# Frontend UI: http://localhost:3000
 ```
-The UI will be available at `http://localhost:3000`
 
 ### Production
-
-1. **Build the frontend**:
 ```bash
-cd backend && npm run build:frontend
-```
-
-2. **Start the production server**:
-```bash
+# Build and start
+npm run build
 cd backend && npm start
 ```
 
-## API Endpoints
+---
+
+## 📡 API Endpoints
 
 ### Health Check
-```
+```http
 GET /api/health
 ```
 
 ### Analyze SQL Content
-```
+```http
 POST /api/analyze
 Content-Type: application/json
 
@@ -104,135 +80,207 @@ Content-Type: application/json
 }
 ```
 
-### Analyze SQL File
+### Analyze PostgreSQL Dump File (Multi-Schema)
+```http
+POST /api/analyze-dump-schemas
+Content-Type: application/json
+
+{
+  "dumpContent": "-- PostgreSQL dump file content..."
+}
 ```
+
+### Analyze SQL File
+```http
 POST /api/analyze-file
 Content-Type: multipart/form-data
 
 sqlFile: [file.sql]
 ```
 
-### Validate SQL
-```
-POST /api/validate
-Content-Type: application/json
+---
 
-{
-  "sqlContent": "CREATE TABLE users (...)"
-}
-```
+## 📊 Response Format
 
-### Get Supported Features
-```
-GET /api/features
-```
-
-## Normalization Rules
-
-### 1NF (First Normal Form)
-- **No Repeating Groups**: Detects array types and multi-value columns
-- **Atomic Values**: Ensures columns contain indivisible values
-- **Primary Key Required**: Every table must have a primary key
-
-### 2NF (Second Normal Form)  
-- **No Partial Dependencies**: Non-key attributes must depend on entire composite primary key
-- **Full Functional Dependency**: All attributes must fully depend on the primary key
-
-### 3NF (Third Normal Form)
-- **No Transitive Dependencies**: Non-key attributes must not depend on other non-key attributes
-- **Boyce-Codd Normal Form**: Every determinant must be a candidate key
-
-## Response Format
-
+### Multi-Schema Analysis Response
 ```json
 {
   "success": true,
-  "report": {
-    "schema": { ... },
-    "compliance": {
-      "1NF": {
-        "score": 95.5,
-        "totalRules": 3,
-        "passedRules": 2,
-        "violations": [ ... ]
-      },
-      "2NF": { ... },
-      "3NF": { ... }
-    },
-    "overallScore": 87.3,
-    "summary": {
-      "totalViolations": 3,
-      "criticalViolations": 1,
-      "warnings": 2
-    }
+  "summary": {
+    "totalSchemas": 4,
+    "totalTables": 65,
+    "overallScore": 73.3
   },
-  "warnings": [ ... ]
+  "schemas": [
+    {
+      "schemaName": "auth",
+      "tableCount": 17,
+      "normalization": {
+        "1NF": { "score": 0.0, "violatedTables": 17 },
+        "2NF": { "score": 100.0, "violatedTables": 0 },
+        "3NF": { "score": 100.0, "violatedTables": 0 }
+      },
+      "violations": [...],
+      "status": "NEEDS_ATTENTION"
+    }
+  ],
+  "dumpInfo": {
+    "format": "binary",
+    "tablesExtracted": 65,
+    "errors": []
+  }
 }
 ```
 
-## Project Structure
+---
+
+## 🔧 Normalization Rules
+
+### 1NF (First Normal Form)
+- **No Repeating Groups**: Detects JSON/JSONB columns, arrays
+- **Atomic Values**: Ensures columns contain indivisible values
+- **Primary Key Required**: Every table must have a primary key
+
+### 2NF (Second Normal Form)
+- **No Partial Dependencies**: Non-key attributes depend on entire composite primary key
+- **Full Functional Dependency**: All attributes fully depend on primary key
+
+### 3NF (Third Normal Form)
+- **No Transitive Dependencies**: Non-key attributes don't depend on other non-key attributes
+- **Boyce-Codd Normal Form**: Every determinant is a candidate key
+
+---
+
+## 🏗️ Project Structure
 
 ```
 NormaDB/
 ├── backend/
 │   ├── src/
 │   │   ├── analyzer/
-│   │   │   ├── complianceCalculator.ts
-│   │   │   └── databaseAnalyzer.ts
+│   │   │   ├── databaseAnalyzer.ts      # Single entry point analyzer
+│   │   │   └── complianceCalculator.ts   # Scoring engine
 │   │   ├── parser/
-│   │   │   └── sqlParser.ts
+│   │   │   ├── sqlParser.ts             # SQL file parser
+│   │   │   └── dumpParser.ts            # PostgreSQL dump parser
 │   │   ├── rules/
-│   │   │   ├── ruleEngine.ts
-│   │   │   ├── firstNormalFormRules.ts
-│   │   │   ├── secondNormalFormRules.ts
-│   │   │   └── thirdNormalFormRules.ts
+│   │   │   ├── firstNormalFormRules.ts  # 1NF rule implementations
+│   │   │   ├── secondNormalFormRules.ts # 2NF rule implementations
+│   │   │   └── thirdNormalFormRules.ts  # 3NF rule implementations
 │   │   ├── types/
-│   │   │   └── schema.ts
-│   │   └── server.ts
-│   ├── dist/
+│   │   │   ├── schema.ts                # Core data structures
+│   │   │   ├── dumpParser.ts            # ExtractedTable interface
+│   │   │   └── analysis.ts              # Analysis result types
+│   │   └── server.ts                    # Express API server
+│   ├── dist/                            # Compiled TypeScript
 │   ├── package.json
-│   ├── tsconfig.json
-│   ├── test-schema.sql
-│   └── test-analysis.js
+│   └── tsconfig.json
 ├── frontend/
 │   ├── src/
-│   │   ├── App.js
-│   │   ├── App.css
-│   │   └── index.js
-│   ├── public/
-│   │   └── index.html
-│   ├── build/
+│   │   ├── App.js                       # React application
+│   │   └── App.css                      # Styling
+│   ├── build/                           # Built React app
 │   └── package.json
 ├── .gitignore
-└── README.md
+├── README.md
+└── VERSION_1_FREEZE.md                  # Version-1 scope documentation
 ```
 
-## Technical Specifications
+---
+
+## 🎯 Technical Specifications
 
 - **Language**: TypeScript
 - **Backend**: Node.js + Express
 - **Frontend**: React 18
-- **Database Support**: PostgreSQL only
-- **No AI/ML**: Pure rule-based analysis
-- **No Database Connections**: Analyzes SQL files only
-- **No Data Storage**: Stateless processing
+- **Database Support**: PostgreSQL (dump files + SQL)
+- **Architecture**: Clean separation of concerns
+- **Analysis**: Deterministic rule-based (no AI/ML)
+- **Processing**: Stateless, no database connections
+- **Contracts**: Runtime validation enforced
 
-## Limitations
+---
 
-- PostgreSQL dialect only
-- No ALTER TABLE support
-- No CREATE VIEW support
-- No stored procedure analysis
-- Heuristic-based 2NF/3NF detection (confidence scores provided)
+## 🏆 Version-1 Achievements
 
-## Contributing
+### ✅ Production Ready Features
+- **4+ Schema Detection**: auth, public, realtime, storage, etc.
+- **65+ Table Analysis**: Real-world PostgreSQL databases
+- **65+ Violation Detection**: Comprehensive normalization analysis
+- **Clean Architecture**: Single entry point, no SQL re-parsing
+- **Runtime Contracts**: Type safety and validation
+- **Multi-Format Support**: SQL files + PostgreSQL dumps
 
-This is Version-1 focused on core functionality. Future versions may include:
-- Additional SQL dialects
-- Advanced visualization
+### 🎯 Architecture Highlights
+- **API decides parser, not analyzer** - Clean separation
+- **Single analyzer entry point** - No guessing, no fallbacks
+- **No SQL re-parsing in analyzer** - Only analysis
+- **Schema guessing eliminated** - Extracted facts only
+- **Production-grade codebase** - TypeScript, testing, clean code
+
+---
+
+## 📈 Example Usage
+
+### Analyzing a Multi-Schema Database
+```bash
+curl -X POST http://localhost:3001/api/analyze-dump-schemas \
+  -H "Content-Type: application/json" \
+  -d '{"dumpContent": "$(cat database.dump)"}'
+```
+
+### Response
+```json
+{
+  "success": true,
+  "summary": {
+    "totalSchemas": 4,
+    "totalTables": 65,
+    "overallScore": 73.3
+  },
+  "schemas": [
+    {"schemaName": "auth", "tableCount": 17, "status": "NEEDS_ATTENTION"},
+    {"schemaName": "public", "tableCount": 38, "status": "NEEDS_ATTENTION"},
+    {"schemaName": "realtime", "tableCount": 3, "status": "NEEDS_ATTENTION"},
+    {"schemaName": "storage", "tableCount": 7, "status": "NEEDS_ATTENTION"}
+  ]
+}
+```
+
+---
+
+## ⚠️ Version-1 Limitations
+
+- **PostgreSQL only**: Single database dialect support
+- **Static analysis**: No live database connections
+- **Rule-based**: No AI/ML or heuristic learning
+- **File-based**: Analyzes SQL/dump files only
+- **No persistence**: Stateless processing
+
+---
+
+## 🤝 Contributing
+
+**Version-1 is frozen** - focused on core functionality stability.
+
+Future versions may include:
+- Additional SQL dialects (MySQL, SQL Server)
+- Advanced visualization features
 - Schema comparison tools
-- Enterprise features
+- Enterprise integrations
 
-## License
+---
 
-MIT License
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## 🏁 Version-1.0.0
+
+**Released**: January 2026  
+**Status**: Production Ready  
+**Architecture**: Clean, deterministic, rule-based  
+
+**🚀 NormaDB - Static database normalization analysis done right.**

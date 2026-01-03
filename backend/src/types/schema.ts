@@ -12,6 +12,7 @@ export interface Column {
 
 export interface Table {
   name: string;
+  schemaName?: string;
   columns: Record<string, Column>;
   primaryKeys: string[];
   foreignKeys: Array<{
@@ -23,7 +24,7 @@ export interface Table {
 }
 
 export interface DatabaseSchema {
-  tables: Record<string, Table>;
+  tables: Record<string, Table>; // Key: tableName, Table object has schemaName
 }
 
 export interface Violation {
@@ -43,6 +44,9 @@ export interface ComplianceScore {
   totalRules: number;
   passedRules: number;
   violations: Violation[];
+  maxWeight: number;
+  violatedWeight: number;
+  rulesEvaluated: number;
 }
 
 export interface AnalysisReport {

@@ -1,14 +1,15 @@
-import { NormalizationRule } from './ruleEngine';
+import { BaseNormalizationRule, RuleResult } from './normalizationRule';
 import { DatabaseSchema, Violation } from '../types/schema';
 
-export class NoPartialDependencyRule extends NormalizationRule {
+export class NoPartialDependencyRule extends BaseNormalizationRule {
   readonly normalForm = '2NF' as const;
   readonly name = 'No Partial Dependencies';
   readonly description = 'Non-key attributes must depend on the entire primary key';
-  readonly weight = 1.0;
+  readonly weight = 0.6;
   
-  check(schema: DatabaseSchema): Violation[] {
+  evaluate(schema: DatabaseSchema): RuleResult {
     const violations: Violation[] = [];
+    let hasViolations = false;
     
     for (const [tableName, table] of Object.entries(schema.tables)) {
       if (table.primaryKeys.length <= 1) {
@@ -30,11 +31,32 @@ export class NoPartialDependencyRule extends NormalizationRule {
             'WARNING',
             confidence
           ));
+          hasViolations = true;
         }
       }
     }
     
-    return violations;
+    return {
+      scoreContribution: hasViolations ? 0 : 1,
+      violations,
+      confidence: 0.7, // This is a heuristic rule
+      explanation: hasViolations 
+        ? 'Tables with composite primary keys may have partial dependencies'
+        : 'No partial dependencies detected'
+    };
+  }
+  
+  getExplanation() {
+    return {
+      whyThisFails: 'In tables with composite primary keys, some columns may depend on only part of the key rather than the entire key.',
+      whatToFixFirst: 'Move partially dependent columns to separate tables with the relevant part of the composite key.',
+      exampleFixSQL: `-- Instead of:
+CREATE TABLE enrollment (student_id INTEGER, course_id INTEGER, grade TEXT, PRIMARY KEY (student_id, course_id));
+-- Use:
+CREATE TABLE enrollment (student_id INTEGER, course_id INTEGER, PRIMARY KEY (student_id, course_id));
+CREATE TABLE student_grades (student_id INTEGER, grade TEXT, PRIMARY KEY (student_id));`,
+      impact: 'High (60%)'
+    };
   }
   
   private assessPartialDependencyConfidence(column: any, table: any): number {
@@ -66,14 +88,15 @@ export class NoPartialDependencyRule extends NormalizationRule {
   }
 }
 
-export class FullFunctionalDependencyRule extends NormalizationRule {
+export class FullFunctionalDependencyRule extends BaseNormalizationRule {
   readonly normalForm = '2NF' as const;
   readonly name = 'Full Functional Dependency';
-  readonly description = 'All non-key attributes must fully depend on the primary key';
-  readonly weight = 0.8;
+  readonly description = 'All attributes must fully depend on the primary key';
+  readonly weight = 0.4;
   
-  check(schema: DatabaseSchema): Violation[] {
+  evaluate(schema: DatabaseSchema): RuleResult {
     const violations: Violation[] = [];
+    let hasViolations = false;
     
     for (const [tableName, table] of Object.entries(schema.tables)) {
       if (table.primaryKeys.length === 0) {
@@ -83,37 +106,59 @@ export class FullFunctionalDependencyRule extends NormalizationRule {
       const nonKeyColumns = this.getNonKeyColumns(schema, tableName);
       
       for (const column of nonKeyColumns) {
-        if (this.appearsToBeDerivedAttribute(column.name, table)) {
+        const confidence = this.assessFunctionalDependencyConfidence(column, table);
+        
+        if (confidence > 0.5) {
           violations.push(this.createViolation(
             tableName,
             column.name,
-            `Column '${column.name}' appears to be a derived attribute`,
-            'Second Normal Form requires that all attributes be fully dependent on the primary key.',
-            `Consider removing derived attributes or moving them to a view`,
+            `Column '${column.name}' may not have full functional dependency on primary key`,
+            'Second Normal Form requires that all non-key attributes have full functional dependency on the primary key.',
+            `Consider reviewing the relationship between '${column.name}' and the primary key`,
             'WARNING',
-            0.6
+            confidence
           ));
+          hasViolations = true;
         }
       }
     }
     
-    return violations;
+    return {
+      scoreContribution: hasViolations ? 0 : 1,
+      violations,
+      confidence: 0.6, // This is a heuristic rule
+      explanation: hasViolations 
+        ? 'Some columns may not have full functional dependency on primary key'
+        : 'All columns appear to have full functional dependency'
+    };
   }
   
-  private appearsToBeDerivedAttribute(columnName: string, table: any): boolean {
+  getExplanation() {
+    return {
+      whyThisFails: 'Some non-key attributes may not be fully determined by the primary key.',
+      whatToFixFirst: 'Review the functional dependencies and ensure all non-key attributes depend fully on the primary key.',
+      exampleFixSQL: `-- Review table structure to ensure proper functional dependencies
+CREATE TABLE orders (id SERIAL PRIMARY KEY, customer_id INTEGER, order_date TIMESTAMP, total DECIMAL);
+-- Ensure total is fully dependent on the order id, not just customer_id`,
+      impact: 'Medium (40%)'
+    };
+  }
+  
+  private assessFunctionalDependencyConfidence(column: any, table: any): number {
+    const columnName = column.name.toLowerCase();
+    
+    // Look for derived/computed column patterns
     const derivedPatterns = [
-      /total_/i,
-      /sum_/i,
-      /count_/i,
-      /avg_/i,
+      /_total$/i,
+      /_sum$/i,
+      /_count$/i,
+      /_avg$/i,
       /average_/i,
       /calc_/i,
       /computed_/i,
-      /_total$/i,
-      /_sum$/i,
-      /_count$/i
+      /count_/i
     ];
     
-    return derivedPatterns.some(pattern => pattern.test(columnName));
+    return derivedPatterns.some(pattern => pattern.test(columnName)) ? 0.7 : 0.3;
   }
 }

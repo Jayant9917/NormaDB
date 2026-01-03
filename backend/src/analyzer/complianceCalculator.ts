@@ -1,15 +1,15 @@
 import { DatabaseSchema, Violation, ComplianceScore, AnalysisReport } from '../types/schema';
-import { RuleEngine } from '../rules/ruleEngine';
+import { NormalizationRule, RuleResult } from '../rules/normalizationRule';
 
 export class ComplianceCalculator {
-  private ruleEngine: RuleEngine;
+  private rules: Map<string, NormalizationRule> = new Map();
   
-  constructor(ruleEngine: RuleEngine) {
-    this.ruleEngine = ruleEngine;
+  addRule(rule: NormalizationRule): void {
+    this.rules.set(`${rule.normalForm}-${rule.name}`, rule);
   }
   
   calculateCompliance(schema: DatabaseSchema): AnalysisReport {
-    const violations = this.ruleEngine.analyzeSchema(schema);
+    const violations = this.evaluateAllRules(schema);
     
     const compliance1NF = this.calculateNormalFormCompliance('1NF', violations['1NF'], schema);
     const compliance2NF = this.calculateNormalFormCompliance('2NF', violations['2NF'], schema);
@@ -31,15 +31,39 @@ export class ComplianceCalculator {
     };
   }
   
+  private evaluateAllRules(schema: DatabaseSchema): {
+    '1NF': Violation[];
+    '2NF': Violation[];
+    '3NF': Violation[];
+  } {
+    const result = {
+      '1NF': [] as Violation[],
+      '2NF': [] as Violation[],
+      '3NF': [] as Violation[]
+    };
+    
+    for (const rule of this.rules.values()) {
+      try {
+        const ruleResult: RuleResult = rule.evaluate(schema);
+        result[rule.normalForm].push(...ruleResult.violations);
+      } catch (error) {
+        console.error(`Error in rule ${rule.name}:`, error);
+      }
+    }
+    
+    return result;
+  }
+  
   private calculateNormalFormCompliance(
     normalForm: '1NF' | '2NF' | '3NF',
     violations: Violation[],
     schema: DatabaseSchema
   ): ComplianceScore {
-    const totalRules = this.ruleEngine.getTotalRules(normalForm);
-    const weightedViolations = this.calculateWeightedViolations(violations);
-    const maxWeight = this.ruleEngine.getRulesByNormalForm(normalForm)
-      .reduce((sum, rule) => sum + rule.weight, 0);
+    const normalFormRules = Array.from(this.rules.values())
+      .filter(rule => rule.normalForm === normalForm);
+    
+    const maxWeight = normalFormRules.reduce((sum, rule) => sum + rule.weight, 0);
+    const weightedViolations = this.calculateWeightedViolations(violations, normalForm);
     
     const score = Math.max(0, Math.min(100, 
       ((maxWeight - weightedViolations) / maxWeight) * 100
@@ -48,26 +72,95 @@ export class ComplianceCalculator {
     return {
       normalForm,
       score: Math.round(score * 100) / 100,
-      totalRules,
-      passedRules: Math.max(0, totalRules - violations.length),
-      violations
+      totalRules: normalFormRules.length,
+      passedRules: Math.max(0, normalFormRules.length - this.getUniqueRuleCount(violations, normalForm)),
+      violations,
+      maxWeight: Math.round(maxWeight * 100) / 100,
+      violatedWeight: Math.round(weightedViolations * 100) / 100,
+      rulesEvaluated: normalFormRules.length
     };
   }
   
-  private calculateWeightedViolations(violations: Violation[]): number {
-    return violations.reduce((total, violation) => {
-      const weight = this.getViolationWeight(violation);
-      return total + (weight * violation.confidence);
-    }, 0);
+  private calculateWeightedViolations(violations: Violation[], normalForm: '1NF' | '2NF' | '3NF'): number {
+    // Calculate weight based on the specific rules violated
+    let totalWeight = 0;
+    
+    for (const violation of violations) {
+      if (violation.normalForm === normalForm) {
+        // Find the rule that generated this violation
+        const rule = this.findRuleByViolation(violation);
+        if (rule) {
+          totalWeight += rule.weight;
+        }
+      }
+    }
+    
+    return totalWeight;
   }
   
-  private getViolationWeight(violation: Violation): number {
-    if (violation.severity === 'ERROR') {
-      return 1.0;
-    } else if (violation.severity === 'WARNING') {
-      return 0.5;
+  private findRuleByViolation(violation: Violation): NormalizationRule | undefined {
+    for (const rule of this.rules.values()) {
+      if (rule.normalForm === violation.normalForm) {
+        // Match violations to rules based on message content
+        if (this.matchesRule(violation, rule)) {
+          return rule;
+        }
+      }
     }
-    return 0.25;
+    return undefined;
+  }
+  
+  private matchesRule(violation: Violation, rule: NormalizationRule): boolean {
+    const message = violation.message.toLowerCase();
+    const ruleName = rule.name.toLowerCase();
+    
+    // 1NF rule matching
+    if (rule.normalForm === '1NF') {
+      if (ruleName === 'no repeating groups') {
+        return message.includes('json') || message.includes('array');
+      }
+      if (ruleName === 'atomic values') {
+        return message.includes('multi-value') || message.includes('atomic');
+      }
+      if (ruleName === 'primary key required') {
+        return message.includes('no primary key') || message.includes('has no primary key');
+      }
+    }
+    
+    // 2NF rule matching
+    if (rule.normalForm === '2NF') {
+      if (ruleName === 'no partial dependencies') {
+        return message.includes('partial dependency');
+      }
+      if (ruleName === 'full functional dependency') {
+        return message.includes('full functional dependency');
+      }
+    }
+    
+    // 3NF rule matching
+    if (rule.normalForm === '3NF') {
+      if (ruleName === 'no transitive dependencies') {
+        return message.includes('determinant') || message.includes('transitive');
+      }
+      if (ruleName === 'boyce-codd normal form check') {
+        return message.includes('determinant') || message.includes('candidate key');
+      }
+    }
+    
+    return false;
+  }
+  
+  private getUniqueRuleCount(violations: Violation[], normalForm: '1NF' | '2NF' | '3NF'): number {
+    const ruleNames = new Set();
+    for (const violation of violations) {
+      if (violation.normalForm === normalForm) {
+        const rule = this.findRuleByViolation(violation);
+        if (rule) {
+          ruleNames.add(rule.name);
+        }
+      }
+    }
+    return ruleNames.size;
   }
   
   private calculateOverallScore(
@@ -110,26 +203,45 @@ export class ComplianceCalculator {
     };
   }
   
-  generateRecommendations(report: AnalysisReport): string[] {
-    const recommendations: string[] = [];
+  // Explainability methods
+  getRuleExplanation(normalForm: '1NF' | '2NF' | '3NF', ruleName: string) {
+    const rule = this.rules.get(`${normalForm}-${ruleName}`);
+    return rule ? rule.getExplanation() : null;
+  }
+  
+  getHighestWeightViolation(violations: Violation[]): Violation | null {
+    if (violations.length === 0) return null;
     
-    if (report.compliance['1NF'].score < 100) {
-      const critical1NF = report.compliance['1NF'].violations.filter(v => v.severity === 'ERROR');
-      if (critical1NF.length > 0) {
-        recommendations.push('Address First Normal Form violations first - ensure all tables have primary keys and atomic values');
+    let highestWeightViolation = violations[0];
+    let highestWeight = 0;
+    
+    for (const violation of violations) {
+      const rule = this.findRuleByViolation(violation);
+      if (rule && rule.weight > highestWeight) {
+        highestWeight = rule.weight;
+        highestWeightViolation = violation;
       }
     }
     
-    if (report.compliance['2NF'].score < 90) {
-      recommendations.push('Review Second Normal Form compliance - check for partial dependencies in tables with composite keys');
-    }
+    return highestWeightViolation;
+  }
+  
+  getFixRecommendations(violations: Violation[]): string[] {
+    const recommendations: string[] = [];
+    const processedRules = new Set();
     
-    if (report.compliance['3NF'].score < 85) {
-      recommendations.push('Consider Third Normal Form improvements - eliminate transitive dependencies by creating separate tables');
-    }
+    // Sort violations by weight (highest first)
+    const sortedViolations = violations
+      .map(v => ({ violation: v, rule: this.findRuleByViolation(v) }))
+      .filter(item => item.rule !== undefined)
+      .sort((a, b) => (b.rule?.weight || 0) - (a.rule?.weight || 0));
     
-    if (report.overallScore > 90) {
-      recommendations.push('Schema is well-normalized. Consider maintaining current structure for future changes.');
+    for (const { violation, rule } of sortedViolations) {
+      if (rule && !processedRules.has(rule.name)) {
+        const explanation = rule.getExplanation();
+        recommendations.push(explanation.whatToFixFirst);
+        processedRules.add(rule.name);
+      }
     }
     
     return recommendations;

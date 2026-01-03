@@ -15,7 +15,17 @@ export class SQLParser {
         
         const table = this.parseCreateTable(trimmedStatement);
         if (table) {
+          // CRITICAL FIX: Use table.name as the key, not schema name
+          // The Table object itself contains both name and schemaName
           schema.tables[table.name] = table;
+          
+          // ASSERTION: Validate table structure
+          if (!table.name || table.name.includes('.')) {
+            throw new Error(`Invalid table name: ${table.name}`);
+          }
+          if (!table.schemaName) {
+            throw new Error(`Missing schema for table ${table.name}`);
+          }
         }
       }
     } catch (error) {
@@ -62,10 +72,27 @@ export class SQLParser {
   }
   
   private parseCreateTable(statement: string): Table | null {
-    const tableNameMatch = statement.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["`']?(\w+)["`']?)/i);
+    // Simple and clear regex for schema.table or table
+    const tableNameMatch = statement.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)(?:\.(\w+))?/i);
     if (!tableNameMatch) return null;
     
-    const tableName = tableNameMatch[1];
+    let tableName: string;
+    let schemaName: string;
+    
+    // Check if we have schema.table pattern (group 2 exists)
+    if (tableNameMatch[2]) {
+      schemaName = tableNameMatch[1]; // schema name
+      tableName = tableNameMatch[2]; // table name
+    } else {
+      // No schema, just table name
+      schemaName = 'public';
+      tableName = tableNameMatch[1]; // table name
+    }
+    
+    // Normalize to lowercase
+    tableName = tableName.toLowerCase();
+    schemaName = schemaName.toLowerCase();
+    
     const columnsMatch = statement.match(/\((.*)\)/s);
     if (!columnsMatch) return null;
     
@@ -74,6 +101,7 @@ export class SQLParser {
     
     const table: Table = {
       name: tableName,
+      schemaName: schemaName,
       columns: {},
       primaryKeys: [],
       foreignKeys: [],
@@ -143,11 +171,19 @@ export class SQLParser {
   }
   
   private parseColumn(line: string): Column | null {
-    const parts = line.trim().split(/\s+/);
-    if (parts.length < 2) return null;
+    // Handle quoted column names: "User Name"
+    const columnMatch = line.match(/^(["`']([^"`']+)["`']|(\w+))\s+(.+)$/);
+    if (!columnMatch) return null;
     
-    const columnName = parts[0].replace(/["`']/g, '');
-    const dataType = parts[1].toUpperCase();
+    const columnName = columnMatch[2] || columnMatch[3]; // Get quoted or unquoted name
+    const remainingLine = columnMatch[4];
+    
+    // Extract data type (handle quoted types and complex types)
+    const typeMatch = remainingLine.match(/^([a-zA-Z0-9_\[\]()]+)/);
+    if (!typeMatch) return null;
+    
+    const dataType = typeMatch[1].toUpperCase();
+    const remainingParts = remainingLine.substring(typeMatch[1].length).trim();
     
     const column: Column = {
       name: columnName,
@@ -156,8 +192,6 @@ export class SQLParser {
       primaryKey: false,
       unique: false
     };
-    
-    const remainingParts = parts.slice(2).join(' ');
     
     column.nullable = !remainingParts.toUpperCase().includes('NOT NULL');
     column.primaryKey = remainingParts.toUpperCase().includes('PRIMARY KEY');
@@ -213,6 +247,10 @@ export class SQLParser {
       this.parseForeignKey(line, table);
     } else if (upperLine.includes('UNIQUE')) {
       this.parseUnique(line, table);
+    } else if (upperLine.includes('CHECK')) {
+      throw new Error('Unsupported SQL construct: CHECK constraint');
+    } else {
+      throw new Error(`Unsupported SQL construct: ${line.split(/\s+/)[0] || 'UNKNOWN'}`);
     }
   }
 }
