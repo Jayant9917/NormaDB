@@ -1,5 +1,6 @@
 # NormaDB - Database Normalization Analyzer
 
+
 **Version-1.0.0 - Production Ready** 🚀
 
 > Static database normalization analyzer for PostgreSQL with clean architecture and multi-schema support.

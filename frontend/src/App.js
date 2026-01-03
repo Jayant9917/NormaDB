@@ -200,6 +200,7 @@ function App() {
 
     setLoading(true);
     setError('');
+    setAnalysis(null); // Clear old analysis when uploading file
 
     try {
       // Check if it's a dump file

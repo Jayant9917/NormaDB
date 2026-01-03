@@ -286,6 +286,18 @@ export class DumpParser {
    */
   static getDumpInfo(dumpContent: string): { format: string } {        
     // Detect binary vs text format
-    return { format: dumpContent.startsWith('PGDMP') ? 'binary' : 'text' };
+    if (dumpContent.startsWith('PGDMP')) {
+      return { format: 'binary' };
+    }
+    
+    // Check for multi-schema content (schema-qualified tables or CREATE SCHEMA statements)
+    const hasSchemaStatements = /CREATE\s+SCHEMA/i.test(dumpContent);
+    const hasSchemaQualifiedTables = /CREATE\s+TABLE\s+(?:["`']?\w+["`']?\.)\w+/i.test(dumpContent);
+    
+    if (hasSchemaStatements || hasSchemaQualifiedTables) {
+      return { format: 'multi-schema' };
+    }
+    
+    return { format: 'text' };
   }
 }

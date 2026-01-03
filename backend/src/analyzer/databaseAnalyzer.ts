@@ -379,40 +379,39 @@ export class DatabaseAnalyzer {
       // Check if this is a dump file
       const dumpInfo = DumpParser.getDumpInfo(sqlContent);
       
-      let schema: DatabaseSchema;
-      let analysisNotes: string[] = [];
-      
       if (dumpInfo.format !== 'text' && dumpInfo.format !== 'unknown') {
-        // This is a dump file, extract schema first
+        // This is a dump file - use the clean architecture path
         const dumpResult = DumpParser.parseDumpFile(sqlContent);
         
         if (!dumpResult.success) {
           throw new Error(`Failed to parse dump file: ${dumpResult.errors.join(', ')}`);
         }
         
-        // For legacy compatibility, combine all CREATE statements
-        const combinedSQL = dumpResult.tables.map(table => table.createStatement).join('\n\n');
-        schema = this.parser.parse(combinedSQL);
-        analysisNotes.push(`Analyzed PostgreSQL dump file (${dumpInfo.format} format)`);
-        analysisNotes.push(`Extracted ${dumpResult.tables.length} tables from dump`);
-        analysisNotes.push(`Dump size: ${(dumpResult.metadata.totalSize / 1024).toFixed(2)}KB, Extracted: ${(dumpResult.metadata.extractedSize / 1024).toFixed(2)}KB`);
+        // Use the new clean architecture - single entry point
+        const analysisInput = {
+          tables: dumpResult.tables,
+          metadata: {
+            dialect: 'postgres' as const,
+            sourceType: 'dump' as const
+          }
+        };
         
-        if (dumpResult.errors.length > 0) {
-          analysisNotes.push(`Warnings: ${dumpResult.errors.join(', ')}`);
-        }
+        const report = this.analyze(analysisInput);
+        
+        // Convert to legacy format for backward compatibility
+        return this.convertToLegacyFormat(report, dumpInfo);
+        
       } else {
-        // Regular SQL file
-        schema = this.parser.parse(sqlContent);
-        analysisNotes.push('Analyzed regular SQL file');
+        // Regular SQL file - use SQL parser
+        const schema = this.parser.parse(sqlContent);
+        const report = this.complianceCalculator.calculateCompliance(schema);
+        
+        // Add analysis notes to the report
+        (report as any).analysisNotes = ['Analyzed regular SQL file'];
+        (report as any).dumpInfo = dumpInfo;
+        
+        return report;
       }
-      
-      const report = this.complianceCalculator.calculateCompliance(schema);
-      
-      // Add analysis notes to the report
-      (report as any).analysisNotes = analysisNotes;
-      (report as any).dumpInfo = dumpInfo;
-      
-      return report;
       
     } catch (error) {
       throw new Error(`Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -432,12 +431,25 @@ export class DatabaseAnalyzer {
       throw new Error(`Failed to parse dump file: ${dumpResult.errors.join(', ')}`);
     }
     
-    // For legacy compatibility, combine all CREATE statements into one SQL string
-    const combinedSQL = dumpResult.tables.map(table => table.createStatement).join('\n\n');
-    const report = this.analyzeSQL(combinedSQL);
+    // Use the new clean architecture - single entry point
+    const analysisInput = {
+      tables: dumpResult.tables,
+      metadata: {
+        dialect: 'postgres' as const,
+        sourceType: 'dump' as const
+      }
+    };
+    
+    const report = this.analyze(analysisInput);
+    
+    // Convert to legacy format for backward compatibility
+    const legacyReport = this.convertToLegacyFormat(report, {
+      format: dumpResult.metadata.detectedFormat,
+      size: dumpResult.metadata.totalSize
+    });
     
     return {
-      ...report,
+      ...legacyReport,
       dumpParseResult: dumpResult,
       analysisNotes: [
         `Analyzed PostgreSQL dump file (${dumpResult.metadata.detectedFormat} format)`,
@@ -446,6 +458,64 @@ export class DatabaseAnalyzer {
         ...(dumpResult.errors.length > 0 ? [`Warnings: ${dumpResult.errors.join(', ')}`] : [])
       ]
     };
+  }
+
+  /**
+   * Convert new DatabaseAnalysisResult to legacy AnalysisReport format
+   */
+  private convertToLegacyFormat(report: DatabaseAnalysisResult, dumpInfo: any): AnalysisReport {
+    // Combine all violations from all schemas
+    const allViolations = report.schemas.flatMap(schema => schema.violations);
+    
+    // Create a combined schema for legacy compatibility
+    const combinedSchema: DatabaseSchema = {
+      tables: {}
+    };
+    
+    // Add all tables from all schemas - we need to rebuild from ExtractedTable data
+    // For now, create a minimal schema that will work with compliance calculator
+    report.schemas.forEach(schema => {
+      schema.violations.forEach(violation => {
+        // Create a minimal table entry for each violated table
+        if (!combinedSchema.tables[violation.table]) {
+          combinedSchema.tables[violation.table] = {
+            name: violation.table,
+            schemaName: schema.schemaName,
+            columns: {},
+            primaryKeys: [],
+            foreignKeys: [],
+            uniqueConstraints: []
+          };
+        }
+      });
+    });
+    
+    // Calculate compliance using the existing calculator
+    const complianceReport = this.complianceCalculator.calculateCompliance(combinedSchema);
+    
+    // Override with our aggregated data and violations
+    complianceReport.overallScore = report.overallScore;
+    
+    // Map violations to the old format
+    const legacyViolations = allViolations.map(v => ({
+      normalForm: v.normalForm,
+      table: v.table,
+      column: v.column,
+      severity: v.severity,
+      message: v.message,
+      explanation: v.explanation,
+      suggestion: v.suggestion,
+      confidence: v.confidence
+    }));
+    
+    // Update compliance report with our violations
+    complianceReport.summary.totalViolations = legacyViolations.length;
+    complianceReport.summary.criticalViolations = legacyViolations.filter(v => v.severity === 'ERROR').length;
+    
+    // Add dump info
+    (complianceReport as any).dumpInfo = dumpInfo;
+    
+    return complianceReport;
   }
   
   private initializeRules(): void {
